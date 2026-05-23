@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.yuno.provider.mapper.ProviderCallMapper">
+
+    <resultMap id="providerCallResultMap" type="com.yuno.provider.model.ProviderCall">
+        <id     property="id"                   column="id"
+                typeHandler="com.yuno.provider.config.UUIDTypeHandler"/>
+        <result property="paymentId"             column="payment_id"
+                typeHandler="com.yuno.provider.config.UUIDTypeHandler"/>
+        <result property="providerType"          column="provider_type"
+                typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+        <result property="paymentMethod"         column="payment_method"
+                typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+        <result property="amount"                column="amount"/>
+        <result property="currency"              column="currency"/>
+        <result property="success"               column="success"/>
+        <result property="providerTransactionId" column="provider_transaction_id"/>
+        <result property="errorMessage"          column="error_message"/>
+        <result property="retryCount"            column="retry_count"/>
+        <result property="failoverUsed"          column="failover_used"/>
+        <result property="processingTimeMs"      column="processing_time_ms"/>
+        <result property="correlationId"         column="correlation_id"/>
+        <result property="createdAt"             column="created_at"/>
+    </resultMap>
+
+    <!--
+        INSERT a single provider call record.
+        One row per provider attempt — including failed/retried attempts.
+        This gives analytics queries full visibility into retry patterns.
+    -->
+    <insert id="insert" parameterType="com.yuno.provider.model.ProviderCall">
+        INSERT INTO provider_calls (
+            id, payment_id, provider_type, payment_method, amount, currency,
+            success, provider_transaction_id, error_message,
+            retry_count, failover_used, processing_time_ms, correlation_id, created_at
+        ) VALUES (
+            #{id,          typeHandler=com.yuno.provider.config.UUIDTypeHandler},
+            #{paymentId,   typeHandler=com.yuno.provider.config.UUIDTypeHandler},
+            #{providerType,  typeHandler=org.apache.ibatis.type.EnumTypeHandler},
+            #{paymentMethod, typeHandler=org.apache.ibatis.type.EnumTypeHandler},
+            #{amount}, #{currency},
+            #{success}, #{providerTransactionId}, #{errorMessage},
+            #{retryCount}, #{failoverUsed}, #{processingTimeMs}, #{correlationId},
+            CURRENT_TIMESTAMP
+        )
+    </insert>
+
+    <!--
+        Fetch all provider call attempts for a given payment.
+        Ordered by created_at — shows the retry sequence chronologically.
+    -->
+    <select id="findByPaymentId" resultMap="providerCallResultMap">
+        SELECT
+            id, payment_id, provider_type, payment_method, amount, currency,
+            success, provider_transaction_id, error_message,
+            retry_count, failover_used, processing_time_ms, correlation_id, created_at
+        FROM provider_calls
+        WHERE payment_id = #{paymentId, typeHandler=com.yuno.provider.config.UUIDTypeHandler}
+        ORDER BY created_at ASC
+    </select>
+
+</mapper>

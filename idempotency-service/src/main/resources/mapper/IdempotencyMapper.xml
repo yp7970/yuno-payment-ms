@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.yuno.idempotency.mapper.IdempotencyMapper">
+
+    <resultMap id="idempotencyResultMap" type="com.yuno.idempotency.model.IdempotencyRecord">
+        <id     property="id"             column="id"/>
+        <result property="idempotencyKey" column="idempotency_key"/>
+        <result property="responseBody"   column="response_body"/>
+        <result property="httpStatus"     column="http_status"/>
+        <result property="expiresAt"      column="expires_at"/>
+        <result property="createdAt"      column="created_at"/>
+    </resultMap>
+
+    <!--
+        Fetch by key including expiry check.
+        DB-level comparison is accurate and avoids clock skew between
+        app and DB for TTL decisions.
+    -->
+    <select id="findByKey" resultMap="idempotencyResultMap">
+        SELECT id, idempotency_key, response_body, http_status, expires_at, created_at
+        FROM idempotency_records
+        WHERE idempotency_key = #{idempotencyKey}
+          AND expires_at > CURRENT_TIMESTAMP
+    </select>
+
+    <!--
+        Lightweight existence check — avoids fetching the full TEXT response_body
+        column when we only need to know if the key exists.
+    -->
+    <select id="existsByKey" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1 FROM idempotency_records
+            WHERE idempotency_key = #{idempotencyKey}
+              AND expires_at > CURRENT_TIMESTAMP
+        )
+    </select>
+
+    <!--
+        Insert new idempotency record.
+        expires_at = now + 24 hours — consistent with Redis TTL policy.
+        ON CONFLICT DO NOTHING prevents duplicate-key errors on concurrent
+        duplicate requests that both passed the existence check.
+    -->
+    <insert id="insert" parameterType="com.yuno.idempotency.model.IdempotencyRecord">
+        INSERT INTO idempotency_records (idempotency_key, response_body, http_status, expires_at, created_at)
+        VALUES (#{idempotencyKey}, #{responseBody}, #{httpStatus},
+                CURRENT_TIMESTAMP + INTERVAL '24 hours',
+                CURRENT_TIMESTAMP)
+        ON CONFLICT (idempotency_key) DO NOTHING
+    </insert>
+
+    <!--
+        Cleanup expired records — called by a @Scheduled task.
+        Returns the number of deleted rows for monitoring.
+    -->
+    <delete id="deleteExpired">
+        DELETE FROM idempotency_records WHERE expires_at &lt; #{now}
+    </delete>
+
+</mapper>

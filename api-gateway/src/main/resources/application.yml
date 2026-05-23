@@ -1,0 +1,77 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+
+  # ── Redis (for rate limiting) ──────────────────────────────────────────────
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+  # ── Gateway Routes ─────────────────────────────────────────────────────────
+  cloud:
+    gateway:
+      default-filters:
+        # Forward X-Correlation-Id and X-User-Id to all downstream services
+        - DedupeResponseHeader=Access-Control-Allow-Origin
+
+      routes:
+        # ── Payment Service ────────────────────────────────────────────────
+        - id: payment-service-create
+          uri: ${PAYMENT_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/api/payments
+            - Method=POST
+          filters:
+            - RewritePath=/api/payments, /payments
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 100
+                redis-rate-limiter.burstCapacity: 200
+                redis-rate-limiter.requestedTokens: 1
+
+        - id: payment-service-get
+          uri: ${PAYMENT_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/api/payments/**
+            - Method=GET
+          filters:
+            - RewritePath=/api/payments/(?<segment>.*), /payments/${segment}
+
+        # ── Idempotency Service (internal – not exposed to public) ─────────
+        # In production, this would NOT be in the public gateway.
+        # Exposed here for testing convenience only.
+        - id: idempotency-service
+          uri: ${IDEMPOTENCY_SERVICE_URL:http://localhost:8083}
+          predicates:
+            - Path=/api/idempotency/**
+          filters:
+            - RewritePath=/api/idempotency/(?<segment>.*), /idempotency/${segment}
+
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins: "*"
+            allowedMethods: "*"
+            allowedHeaders: "*"
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+logging:
+  level:
+    com.yuno.gateway: INFO
+    org.springframework.cloud.gateway: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [corrId=%X{correlationId}] %-5level %logger{36} - %msg%n"
+
+# ── Actuator ─────────────────────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway
+  endpoint:
+    gateway:
+      enabled: true

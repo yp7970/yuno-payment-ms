@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.yuno.notification.mapper.NotificationMapper">
+
+    <insert id="insert" parameterType="com.yuno.notification.model.NotificationLog" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO notification_logs (
+            payment_id, user_id, payment_status, payment_method,
+            amount, currency, provider_transaction_id,
+            notification_type, delivery_status, correlation_id, created_at
+        ) VALUES (
+            #{paymentId},
+            #{userId},
+            #{paymentStatus, typeHandler=org.apache.ibatis.type.EnumTypeHandler},
+            #{paymentMethod, typeHandler=org.apache.ibatis.type.EnumTypeHandler},
+            #{amount},
+            #{currency},
+            #{providerTransactionId},
+            #{notificationType},
+            #{deliveryStatus},
+            #{correlationId},
+            CURRENT_TIMESTAMP
+        )
+    </insert>
+
+</mapper>

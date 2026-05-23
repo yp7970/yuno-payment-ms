@@ -1,0 +1,84 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: payment-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/yuno_payment_db
+    username: ${DB_USER:yuno}
+    password: ${DB_PASS:yuno_secret}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      pool-name: PaymentHikariPool
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  kafka:
+    bootstrap-servers: ${KAFKA_SERVERS:localhost:9092}
+    producer:
+      acks: all
+      retries: 3
+    consumer:
+      group-id: payment-service-group
+      auto-offset-reset: earliest
+
+# MyBatis configuration — replaces JPA/Hibernate
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.yuno.payment.model
+  type-handlers-package: com.yuno.payment.config  # registers UUIDTypeHandler
+  configuration:
+    map-underscore-to-camel-case: true   # idempotency_key → idempotencyKey
+    use-generated-keys: true
+    default-fetch-size: 100
+    default-statement-timeout: 30
+
+# Feign client target
+service:
+  idempotency:
+    url: ${IDEMPOTENCY_SERVICE_URL:http://localhost:8083}
+
+# Logging — MDC fields injected by logback pattern
+logging:
+  level:
+    com.yuno.payment: INFO
+    org.mybatis: WARN
+    org.apache.kafka: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [trxId=%X{transactionId:-}] [corrId=%X{correlationId:-}] [userId=%X{userId:-}] [svc=%X{serviceName:-}] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [trxId=%X{transactionId:-}] [corrId=%X{correlationId:-}] [userId=%X{userId:-}] [svc=%X{serviceName:-}] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/payment-service.log
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+---
+spring:
+  config:
+    activate:
+      on-profile: test
+  datasource:
+    url: jdbc:h2:mem:payment_test;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  flyway:
+    enabled: false
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true

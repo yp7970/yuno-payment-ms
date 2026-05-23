@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.yuno.payment.mapper.PaymentMapper">
+
+    <!--
+        ResultMap: explicit column → field mapping.
+
+        Why explicit?
+        - Survives column renames without silent breakage
+        - Self-documents the contract between DB schema and domain model
+        - typeHandlers declared here handle UUID (PostgreSQL OTHER type)
+          and enums cleanly without scattered annotations
+
+        camelCase ↔ snake_case is handled by mybatis.configuration.map-underscore-to-camel-case=true
+        in application.yml, but we declare the ResultMap explicitly for clarity.
+    -->
+    <resultMap id="paymentResultMap" type="com.yuno.payment.model.Payment">
+        <id     property="id"                   column="id"
+                typeHandler="com.yuno.payment.config.UUIDTypeHandler"/>
+        <result property="idempotencyKey"        column="idempotency_key"/>
+        <result property="paymentMethod"         column="payment_method"
+                typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+        <result property="amount"                column="amount"/>
+        <result property="currency"              column="currency"/>
+        <result property="description"           column="description"/>
+        <result property="status"                column="status"
+                typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+        <result property="providerUsed"          column="provider_used"
+                typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+        <result property="providerTransactionId" column="provider_transaction_id"/>
+        <result property="retryCount"            column="retry_count"/>
+        <result property="failoverUsed"          column="failover_used"/>
+        <result property="failureReason"         column="failure_reason"/>
+        <result property="userId"                column="user_id"/>
+        <result property="correlationId"         column="correlation_id"/>
+        <result property="createdAt"             column="created_at"/>
+        <result property="updatedAt"             column="updated_at"/>
+    </resultMap>
+
+    <!-- ─────────────────────────────────────────────────────────────────── -->
+    <!-- INSERT                                                               -->
+    <!-- ─────────────────────────────────────────────────────────────────── -->
+
+    <!--
+        Insert a new payment in PENDING state.
+        created_at and updated_at use DB-side CURRENT_TIMESTAMP — avoids
+        clock skew between app server and DB, and keeps insert fast.
+    -->
+    <insert id="insert" parameterType="com.yuno.payment.model.Payment">
+        INSERT INTO payments (
+            id,
+            idempotency_key,
+            payment_method,
+            amount,
+            currency,
+            description,
+            status,
+            retry_count,
+            failover_used,
+            user_id,
+            correlation_id,
+            created_at,
+            updated_at
+        ) VALUES (
+            #{id, typeHandler=com.yuno.payment.config.UUIDTypeHandler},
+            #{idempotencyKey},
+            #{paymentMethod, typeHandler=org.apache.ibatis.type.EnumTypeHandler},
+            #{amount},
+            #{currency},
+            #{description},
+            #{status, typeHandler=org.apache.ibatis.type.EnumTypeHandler},
+            #{retryCount},
+            #{failoverUsed},
+            #{userId},
+            #{correlationId},
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        )
+    </insert>
+
+    <!-- ─────────────────────────────────────────────────────────────────── -->
+    <!-- SELECT                                                               -->
+    <!-- ─────────────────────────────────────────────────────────────────── -->
+
+    <!--
+        Fetch payment by primary key.
+        Explicit column list (no SELECT *) — avoids accidental data exposure
+        and protects against schema changes breaking the resultMap silently.
+    -->
+    <select id="findById" resultMap="paymentResultMap">
+        SELECT
+            id,
+            idempotency_key,
+            payment_method,
+            amount,
+            currency,
+            description,
+            status,
+            provider_used,
+            provider_transaction_id,
+            retry_count,
+            failover_used,
+            failure_reason,
+            user_id,
+            correlation_id,
+            created_at,
+            updated_at
+        FROM payments
+        WHERE id = #{id, typeHandler=com.yuno.payment.config.UUIDTypeHandler}
+    </select>
+
+    <select id="findByIdempotencyKey" resultMap="paymentResultMap">
+        SELECT
+            id,
+            idempotency_key,
+            payment_method,
+            amount,
+            currency,
+            description,
+            status,
+            provider_used,
+            provider_transaction_id,
+            retry_count,
+            failover_used,
+            failure_reason,
+            user_id,
+            correlation_id,
+            created_at,
+            updated_at
+        FROM payments
+        WHERE idempotency_key = #{idempotencyKey}
+    </select>
+
+    <select id="findByStatus" resultMap="paymentResultMap">
+        SELECT
+            id,
+            idempotency_key,
+            payment_method,
+            amount,
+            currency,
+            description,
+            status,
+            provider_used,
+            provider_transaction_id,
+            retry_count,
+            failover_used,
+            failure_reason,
+            user_id,
+            correlation_id,
+            created_at,
+            updated_at
+        FROM payments
+        WHERE status = #{status, typeHandler=org.apache.ibatis.type.EnumTypeHandler}
+        ORDER BY created_at DESC
+    </select>
+
+    <!--
+        Lightweight existence check — no full row fetch.
+        Used for fast idempotency pre-check.
+    -->
+    <select id="existsByIdempotencyKey" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1 FROM payments WHERE idempotency_key = #{idempotencyKey}
+        )
+    </select>
+
+    <!-- ─────────────────────────────────────────────────────────────────── -->
+    <!-- UPDATE                                                               -->
+    <!-- ─────────────────────────────────────────────────────────────────── -->
+
+    <!--
+        Targeted update after provider-service result event is consumed.
+        Only touches the columns relevant to the outcome — not the full row.
+        updated_at is set to DB CURRENT_TIMESTAMP for accuracy.
+    -->
+    <update id="updateStatusAfterResult">
+        UPDATE payments
+        SET
+            status                   = #{status, typeHandler=org.apache.ibatis.type.EnumTypeHandler},
+            provider_used            = #{providerUsed, typeHandler=org.apache.ibatis.type.EnumTypeHandler},
+            provider_transaction_id  = #{providerTransactionId},
+            retry_count              = #{retryCount},
+            failover_used            = #{failoverUsed},
+            failure_reason           = #{failureReason},
+            updated_at               = CURRENT_TIMESTAMP
+        WHERE id = #{id, typeHandler=com.yuno.payment.config.UUIDTypeHandler}
+    </update>
+
+</mapper>
