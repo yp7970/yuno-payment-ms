@@ -1,4 +1,5 @@
 # Yuno Payment Orchestration — Microservices (v2.0.0)
+![CI](https://github.com/yp7970/yuno-payment-ms/actions/workflows/ci.yml/badge.svg)
 
 A production-grade payment orchestration system built with **Java 17**, **Spring Boot 3.2.5**, and a microservices architecture. Implements full payment routing, idempotency, retry/failover, MDC-based distributed tracing, and async event-driven processing via Kafka.
 
